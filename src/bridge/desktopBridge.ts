@@ -1,5 +1,7 @@
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 export interface BridgeInfo {
   isMock: boolean;
@@ -20,6 +22,7 @@ export interface ScanResult {
   success: boolean;
   content?: string;
   error?: string;
+  path?: string;
 }
 
 export interface CameraScanResult extends ScanResult {
@@ -27,6 +30,8 @@ export interface CameraScanResult extends ScanResult {
   cameraId?: string;
   timestamp: number;
 }
+
+export type DataType = 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo' | 'image';
 
 export interface ImageScanRequest {
   content: string; // Base64 or DataURL content
@@ -36,7 +41,7 @@ export interface ImageScanRequest {
 }
 
 export interface QrPayload {
-  type: 'text' | 'url' | 'wifi' | 'vcard';
+  type: 'text' | 'url' | 'wifi' | 'vcard' | 'image';
   content: string;
 }
 
@@ -69,20 +74,27 @@ export interface SaveFileResult {
   error?: string;
 }
 
+export interface ScanScreenOptions {
+  interactive?: boolean;
+  hideWindow?: boolean;
+}
+
 export interface HistoryItem {
   id: string;
   type: 'scan' | 'generate';
-  dataType: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo';
+  dataType: DataType;
   content: string;
   source?: 'camera' | 'screen' | 'file' | 'manual';
+  filePath?: string;
   timestamp: number;
 }
 
 export interface HistoryItemInput {
   type: 'scan' | 'generate';
-  dataType: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo';
+  dataType: DataType;
   content: string;
   source?: 'camera' | 'screen' | 'file' | 'manual';
+  filePath?: string;
 }
 
 export interface AppSettings {
@@ -106,8 +118,9 @@ export interface DesktopBridge {
 
   // Scanning Actions
   scanImageFile(): Promise<ScanResult>;
+  scanImagePath(path: string): Promise<ScanResult>;
   scanImageData(request: ImageScanRequest): Promise<ScanResult>;
-  scanScreen(): Promise<ScanResult>;
+  scanScreen(options?: ScanScreenOptions): Promise<ScanResult>;
 
   // QR Code Generation
   generateQr(payload: QrPayload, options: QrGenerateOptions): Promise<QrOutput>;
@@ -125,6 +138,198 @@ export interface DesktopBridge {
   // Settings
   getSettings(): Promise<AppSettings>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+}
+
+interface CameraFrame {
+  cameraId?: string;
+  dataUrl: string;
+  timestamp: number;
+}
+
+class TauriBridge implements DesktopBridge {
+  private frameUnsubscribe: (() => void) | null = null;
+  private resultHandlers: Set<(result: CameraScanResult) => void> = new Set();
+  private lastLocalFrameDecode = 0;
+  private lastLocalFrameContent = '';
+  private lastLocalFrameResult = 0;
+
+  constructor() {
+    listen<{ paths?: string[] }>('tauri://drag-drop', (event) => {
+      const paths = event.payload?.paths || [];
+      window.dispatchEvent(new CustomEvent('qr-lab-native-file-drop', { detail: paths }));
+    }).catch((err) => console.warn('Failed to bind native file drop listener:', err));
+  }
+
+  async getBridgeInfo(): Promise<BridgeInfo> {
+    return invoke('get_bridge_info');
+  }
+
+  async listCameras(): Promise<CameraDevice[]> {
+    return invoke('list_cameras');
+  }
+
+  async startCameraScan(options: CameraScanOptions): Promise<void> {
+    await this.ensureFrameListener();
+    return invoke('start_camera_scan', { options });
+  }
+
+  async stopCameraScan(): Promise<void> {
+    await invoke('stop_camera_scan');
+    this.frameUnsubscribe?.();
+    this.frameUnsubscribe = null;
+    const nativeFrame = document.getElementById('scanner-native-frame') as HTMLImageElement | null;
+    if (nativeFrame) nativeFrame.src = '';
+  }
+
+  onCameraScanResult(handler: (result: CameraScanResult) => void): () => void {
+    this.resultHandlers.add(handler);
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<CameraScanResult>('camera-scan-result', (event) => {
+      handler(event.payload);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      this.resultHandlers.delete(handler);
+      unlisten?.();
+    };
+  }
+
+  onCameraScanError(handler: (error: string) => void): () => void {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<string>('camera-scan-error', (event) => {
+      handler(event.payload);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }
+
+  async scanImageFile(): Promise<ScanResult> {
+    return invoke('scan_image_file');
+  }
+
+  async scanImagePath(path: string): Promise<ScanResult> {
+    return invoke('scan_image_path', { path });
+  }
+
+  async scanImageData(request: ImageScanRequest): Promise<ScanResult> {
+    return invoke('scan_image_data', { request });
+  }
+
+  async scanScreen(options?: ScanScreenOptions): Promise<ScanResult> {
+    return invoke('scan_screen', { options });
+  }
+
+  async generateQr(payload: QrPayload, options: QrGenerateOptions): Promise<QrOutput> {
+    return invoke('generate_qr', { payload, options });
+  }
+
+  async saveFile(file: SaveFileRequest): Promise<SaveFileResult> {
+    return invoke('save_file', { file });
+  }
+
+  async copyToClipboard(text: string): Promise<void> {
+    return invoke('copy_to_clipboard', { text });
+  }
+
+  async getHistory(): Promise<HistoryItem[]> {
+    return invoke('get_history');
+  }
+
+  async addHistory(item: HistoryItemInput): Promise<HistoryItem> {
+    return invoke('add_history', { item });
+  }
+
+  async deleteHistory(id: string): Promise<void> {
+    return invoke('delete_history', { id });
+  }
+
+  async clearHistory(): Promise<void> {
+    return invoke('clear_history');
+  }
+
+  async getSettings(): Promise<AppSettings> {
+    return invoke('get_settings');
+  }
+
+  async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+    return invoke('update_settings', { patch });
+  }
+
+  private async ensureFrameListener() {
+    if (this.frameUnsubscribe) return;
+    this.frameUnsubscribe = await listen<CameraFrame>('camera-frame', (event) => {
+      const nativeFrame = document.getElementById('scanner-native-frame') as HTMLImageElement | null;
+      if (nativeFrame) {
+        nativeFrame.src = event.payload.dataUrl;
+      }
+      this.tryDecodeCameraFrameInFrontend(event.payload);
+    });
+  }
+
+  private async tryDecodeCameraFrameInFrontend(frame: CameraFrame) {
+    const now = Date.now();
+    if (now - this.lastLocalFrameDecode < 150) return;
+    this.lastLocalFrameDecode = now;
+
+    try {
+      const content = await decodeQrFromDataUrl(frame.dataUrl);
+      if (!content) return;
+      if (content === this.lastLocalFrameContent && now - this.lastLocalFrameResult < 1500) return;
+      this.lastLocalFrameContent = content;
+      this.lastLocalFrameResult = now;
+      this.resultHandlers.forEach((handler) => {
+        handler({
+          success: true,
+          content,
+          source: 'camera',
+          cameraId: frame.cameraId,
+          timestamp: frame.timestamp || now,
+        });
+      });
+    } catch {
+      // Frontend decode is only a camera fallback; native scanner errors remain authoritative.
+    }
+  }
+}
+
+async function decodeQrFromDataUrl(dataUrl: string): Promise<string | null> {
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('Camera frame failed to load'));
+    img.src = dataUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  const width = img.naturalWidth || img.width;
+  const height = img.naturalHeight || img.height;
+  if (!width || !height) return null;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height);
+  const code = jsQR(data.data, data.width, data.height, { inversionAttempts: 'attemptBoth' });
+  if (code?.data) return code.data;
+
+  const crop = Math.floor(Math.min(width, height) * 0.08);
+  if (crop > 0 && width - crop * 2 > 120 && height - crop * 2 > 120) {
+    const cropped = ctx.getImageData(crop, crop, width - crop * 2, height - crop * 2);
+    const croppedCode = jsQR(cropped.data, cropped.width, cropped.height, { inversionAttempts: 'attemptBoth' });
+    if (croppedCode?.data) return croppedCode.data;
+  }
+  return null;
 }
 
 // ----------------------------------------------------
@@ -375,6 +580,10 @@ class BrowserMockBridge implements DesktopBridge {
     });
   }
 
+  async scanImagePath(): Promise<ScanResult> {
+    return { success: false, error: 'Native file path scanning is only available in Tauri' };
+  }
+
   // Decodes image data
   async scanImageData(request: ImageScanRequest): Promise<ScanResult> {
     return new Promise((resolve) => {
@@ -413,8 +622,11 @@ class BrowserMockBridge implements DesktopBridge {
   }
 
   // Screen Scanning Fallback via WebRTC Screen Sharing API
-  async scanScreen(): Promise<ScanResult> {
+  async scanScreen(options?: ScanScreenOptions): Promise<ScanResult> {
     try {
+      if (options?.hideWindow) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: 'monitor' },
         audio: false,
@@ -587,6 +799,7 @@ class BrowserMockBridge implements DesktopBridge {
       dataType: item.dataType,
       content: item.content,
       source: item.source,
+      filePath: item.filePath,
       timestamp: Date.now(),
     };
     
@@ -650,7 +863,8 @@ declare global {
 }
 
 // Instantiate and expose bridge
-const bridgeInstance: DesktopBridge = window.desktopBridge || new BrowserMockBridge();
+const isTauriRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+const bridgeInstance: DesktopBridge = window.desktopBridge || (isTauriRuntime ? new TauriBridge() : new BrowserMockBridge());
 window.desktopBridge = bridgeInstance;
 
 export default bridgeInstance;

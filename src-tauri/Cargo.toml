@@ -1,0 +1,33 @@
+[package]
+name = "qr-lab"
+version = "0.1.0"
+description = "Cross-platform QR scanner and generator"
+authors = ["QR Lab"]
+edition = "2021"
+
+[lib]
+name = "qr_lab_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+base64 = "0.22.1"
+chrono = { version = "0.4.42", features = ["serde"] }
+image = { version = "=0.25.8", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+nokhwa = { version = "0.10.11", features = ["input-native"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["image", "svg"] }
+rfd = "0.15.4"
+rxing = { version = "0.9.0", features = ["svg_read"] }
+screenshots = "0.8.10"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-clipboard-manager = "2.3.0"
+tauri-plugin-dialog = "2.4.1"
+thiserror = "2.0.17"
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0.1", features = ["v2_40"] }

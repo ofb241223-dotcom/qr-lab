@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+src-tauri/target
 *.local
 
 # Editor directories and files
@@ -28,4 +29,3 @@ test_*.png
 
 # Playwright CLI cache/config
 .playwright-cli/
-

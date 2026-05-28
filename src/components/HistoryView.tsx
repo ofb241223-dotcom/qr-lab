@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Search, Trash2, Copy, RefreshCw, Scan, QrCode, Globe, Wifi, User, FileText, X, Mail, MessageSquare, Phone, MapPin } from 'lucide-react';
+import { Search, Trash2, Copy, RefreshCw, Scan, QrCode, Globe, Wifi, User, FileText, X, Mail, MessageSquare, Phone, MapPin, FileImage } from 'lucide-react';
 import bridge from '../bridge/desktopBridge';
-import type { HistoryItem } from '../bridge/desktopBridge';
+import type { DataType, HistoryItem } from '../bridge/desktopBridge';
 
 interface HistoryViewProps {
   addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
-  onGeneratePreFill: (content: string, type: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo') => void;
+  onGeneratePreFill: (content: string, type: DataType) => void;
 }
 
 export default function HistoryView({ addToast, onGeneratePreFill }: HistoryViewProps) {
@@ -51,13 +51,14 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
   const handleExportCsv = async () => {
     if (historyItems.length === 0) return;
     try {
-      const headers = ['ID', '类型', '格式', '识别内容', '扫描来源', '记录时间'];
+      const headers = ['ID', '类型', '格式', '识别内容', '扫描来源', '保存/来源路径', '记录时间'];
       const rows = historyItems.map(item => [
         item.id,
         item.type === 'scan' ? '扫描' : '生成',
         getDataTypeText(item.dataType),
         `"${item.content.replace(/"/g, '""')}"`,
         getSourceText(item.source),
+        item.filePath ? `"${item.filePath.replace(/"/g, '""')}"` : '',
         new Date(item.timestamp).toLocaleString('zh-CN')
       ]);
       
@@ -94,7 +95,8 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
 
   // Filter lists
   const filteredItems = historyItems.filter((item) => {
-    const matchesSearch = item.content.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = searchQuery.toLowerCase();
+    const matchesSearch = item.content.toLowerCase().includes(query) || (item.filePath || '').toLowerCase().includes(query);
     const matchesCategory = categoryFilter === 'all' || item.type === categoryFilter;
     return matchesSearch && matchesCategory;
   });
@@ -109,11 +111,12 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
     });
   };
 
-  const getDataTypeIcon = (type: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo') => {
+  const getDataTypeIcon = (type: DataType) => {
     switch (type) {
       case 'url': return <Globe size={14} color="var(--accent-cyan)" />;
       case 'wifi': return <Wifi size={14} color="var(--accent-green)" />;
       case 'vcard': return <User size={14} color="var(--accent-orange)" />;
+      case 'image': return <FileImage size={14} color="var(--accent-cyan)" />;
       case 'email': return <Mail size={14} color="var(--accent-cyan)" />;
       case 'sms': return <MessageSquare size={14} color="var(--accent-green)" />;
       case 'phone': return <Phone size={14} color="var(--accent-orange)" />;
@@ -122,11 +125,12 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
     }
   };
 
-  const getDataTypeText = (type: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo') => {
+  const getDataTypeText = (type: DataType) => {
     switch (type) {
       case 'url': return '网址';
       case 'wifi': return 'Wi-Fi';
       case 'vcard': return '名片';
+      case 'image': return '图片';
       case 'email': return '邮件';
       case 'sms': return '短信';
       case 'phone': return '电话';
@@ -234,6 +238,7 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
                 <th style={{ padding: '16px 20px', fontWeight: '600' }}>格式</th>
                 <th style={{ padding: '16px 20px', fontWeight: '600' }}>识别内容</th>
                 <th style={{ padding: '16px 20px', fontWeight: '600' }}>扫描来源</th>
+                <th style={{ padding: '16px 20px', fontWeight: '600' }}>保存/来源路径</th>
                 <th style={{ padding: '16px 20px', fontWeight: '600' }}>时间</th>
                 <th style={{ padding: '16px 20px', fontWeight: '600', textAlign: 'right' }}>操作</th>
               </tr>
@@ -284,6 +289,10 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
                     }}>
                       {getSourceText(item.source)}
                     </span>
+                  </td>
+
+                  <td style={{ padding: '14px 20px', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }} title={item.filePath || ''}>
+                    {item.filePath || '-'}
                   </td>
 
                   {/* Datetime local */}
@@ -341,6 +350,9 @@ export default function HistoryView({ addToast, onGeneratePreFill }: HistoryView
                 
                 <span style={{ color: 'var(--text-muted)' }}>识别来源:</span>
                 <span>{getSourceText(selectedItem.source)}</span>
+
+                <span style={{ color: 'var(--text-muted)' }}>保存/来源路径:</span>
+                <span style={{ wordBreak: 'break-all', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{selectedItem.filePath || '-'}</span>
                 
                 <span style={{ color: 'var(--text-muted)' }}>记录时间:</span>
                 <span>{new Date(selectedItem.timestamp).toLocaleString()}</span>

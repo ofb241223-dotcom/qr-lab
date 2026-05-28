@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Scan, QrCode, History, Settings, Laptop, Moon, Sun, Volume2, VolumeX } from 'lucide-react';
+import { Camera, FileUp, History, Monitor, QrCode, Settings, Laptop, Moon, Sun, Volume2, VolumeX } from 'lucide-react';
 import type { BridgeInfo } from '../bridge/desktopBridge';
 
 // Module-level single AudioContext instance for reliable Web Audio API playback
@@ -22,6 +22,10 @@ const getAudioContext = (): AudioContext | null => {
 interface SidebarProps {
   currentTab: 'scan' | 'generate' | 'history' | 'settings';
   setCurrentTab: (tab: 'scan' | 'generate' | 'history' | 'settings') => void;
+  scanMode: 'camera' | 'screen' | 'file';
+  openCameraScan: () => void;
+  openScreenScan: () => void;
+  openFileScan: () => void;
   bridgeInfo: BridgeInfo | null;
   theme: 'dark' | 'light';
   setTheme: (theme: 'dark' | 'light') => void;
@@ -41,6 +45,10 @@ interface SidebarProps {
 export default function Sidebar({
   currentTab,
   setCurrentTab,
+  scanMode,
+  openCameraScan,
+  openScreenScan,
+  openFileScan,
   bridgeInfo,
   theme,
   setTheme,
@@ -502,12 +510,30 @@ export default function Sidebar({
 
         <nav className="nav-list">
           <button
-            className={`nav-item ${currentTab === 'scan' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('scan')}
+            className={`nav-item ${currentTab === 'scan' && scanMode === 'camera' ? 'active' : ''}`}
+            onClick={openCameraScan}
           >
-            <Scan size={16} />
-            <span style={{ flex: 1 }}>扫描二维码</span>
+            <Camera size={16} />
+            <span style={{ flex: 1 }}>摄像头扫描</span>
             <kbd className="kbd-shortcut">⌥1</kbd>
+          </button>
+
+          <button
+            className={`nav-item ${currentTab === 'scan' && scanMode === 'screen' ? 'active' : ''}`}
+            onClick={openScreenScan}
+          >
+            <Monitor size={16} />
+            <span style={{ flex: 1 }}>截图识别</span>
+            <kbd className="kbd-shortcut">⌥2</kbd>
+          </button>
+
+          <button
+            className={`nav-item ${currentTab === 'scan' && scanMode === 'file' ? 'active' : ''}`}
+            onClick={openFileScan}
+          >
+            <FileUp size={16} />
+            <span style={{ flex: 1 }}>导入图片</span>
+            <kbd className="kbd-shortcut">⌥3</kbd>
           </button>
 
           <button
@@ -516,7 +542,7 @@ export default function Sidebar({
           >
             <QrCode size={16} />
             <span style={{ flex: 1 }}>生成二维码</span>
-            <kbd className="kbd-shortcut">⌥2</kbd>
+            <kbd className="kbd-shortcut">⌥4</kbd>
           </button>
 
           <button
@@ -525,7 +551,7 @@ export default function Sidebar({
           >
             <History size={16} />
             <span style={{ flex: 1 }}>历史记录</span>
-            <kbd className="kbd-shortcut">⌥3</kbd>
+            <kbd className="kbd-shortcut">⌥5</kbd>
           </button>
 
           <button
@@ -534,7 +560,7 @@ export default function Sidebar({
           >
             <Settings size={16} />
             <span style={{ flex: 1 }}>应用设置</span>
-            <kbd className="kbd-shortcut">⌥4</kbd>
+            <kbd className="kbd-shortcut">⌥6</kbd>
           </button>
         </nav>
 

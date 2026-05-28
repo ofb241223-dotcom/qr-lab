@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Type, Link, Wifi, User, Download, FileJson, Palette, Eye, LayoutGrid, Image, Mail, MessageSquare, Phone, MapPin } from 'lucide-react';
+import { Type, Link, Wifi, Download, FileJson, Palette, Eye, LayoutGrid, Image as ImageIcon, Mail, MessageSquare, Phone, MapPin } from 'lucide-react';
 import bridge from '../bridge/desktopBridge';
-import type { AppSettings } from '../bridge/desktopBridge';
+import type { AppSettings, DataType } from '../bridge/desktopBridge';
 import { drawQRCanvas, generateQRSvg } from '../utils/qrDrawingUtil';
 import type { QRDrawingOptions } from '../utils/qrDrawingUtil';
 
@@ -9,8 +9,89 @@ interface GenerateViewProps {
   settings: AppSettings;
   addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   preFillContent: string | null;
-  preFillType: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo' | null;
+  preFillType: DataType | null;
   clearPreFill: () => void;
+}
+
+type GenerateTab = 'text' | 'url' | 'wifi' | 'image' | 'email' | 'sms' | 'phone' | 'geo';
+
+const PHONE_COUNTRIES = [
+  { code: '+86', name: '中国', flag: '🇨🇳' },
+  { code: '+81', name: '日本', flag: '🇯🇵' },
+  { code: '+1', name: '美国 / 加拿大', flag: '🇺🇸' },
+  { code: '+44', name: '英国', flag: '🇬🇧' },
+  { code: '+82', name: '韩国', flag: '🇰🇷' },
+  { code: '+65', name: '新加坡', flag: '🇸🇬' },
+  { code: '+852', name: '中国香港', flag: '🇭🇰' },
+  { code: '+853', name: '中国澳门', flag: '🇲🇴' },
+  { code: '+886', name: '中国台湾', flag: '🇹🇼' },
+  { code: '+61', name: '澳大利亚', flag: '🇦🇺' },
+  { code: '+49', name: '德国', flag: '🇩🇪' },
+  { code: '+33', name: '法国', flag: '🇫🇷' },
+  { code: '+39', name: '意大利', flag: '🇮🇹' },
+  { code: '+34', name: '西班牙', flag: '🇪🇸' },
+  { code: '+7', name: '俄罗斯', flag: '🇷🇺' },
+  { code: '+91', name: '印度', flag: '🇮🇳' },
+  { code: '+55', name: '巴西', flag: '🇧🇷' },
+  { code: '+52', name: '墨西哥', flag: '🇲🇽' },
+];
+
+const COMMON_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/bmp';
+
+interface PhoneNumberFieldProps {
+  label: string;
+  countryCode: string;
+  onCountryCodeChange: (value: string) => void;
+  number: string;
+  onNumberChange: (value: string) => void;
+  payloadPrefix: string;
+  payloadValue: string;
+}
+
+function PhoneNumberField({
+  label,
+  countryCode,
+  onCountryCodeChange,
+  number,
+  onNumberChange,
+  payloadPrefix,
+  payloadValue,
+}: PhoneNumberFieldProps) {
+  return (
+    <div className="form-group" style={{ margin: 0, position: 'relative' }}>
+      <label className="form-label">{label}</label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 230px) minmax(0, 1fr)', gap: '10px', alignItems: 'center' }}>
+        <select
+          className="form-select"
+          value={countryCode}
+          onChange={(e) => onCountryCodeChange(e.target.value)}
+          style={{ width: '100%', minWidth: 0, height: '42px', fontSize: '0.82rem' }}
+        >
+          {PHONE_COUNTRIES.map((country) => (
+            <option key={`${country.code}-${country.name}`} value={country.code}>
+              {country.flag} {country.name} {country.code}
+            </option>
+          ))}
+        </select>
+        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, border: '1px solid var(--border-glass)', background: 'rgba(0,0,0,0.35)', borderRadius: '4px', overflow: 'hidden', height: '42px' }}>
+          <span style={{ padding: '0 12px', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', borderRight: '1px solid var(--border-glass)' }}>
+            {countryCode}
+          </span>
+          <input
+            type="tel"
+            className="form-input"
+            value={number}
+            onChange={(e) => onNumberChange(e.target.value)}
+            placeholder="手机号码"
+            style={{ border: 0, borderRadius: 0, background: 'transparent', minWidth: 0, height: '100%' }}
+          />
+        </div>
+      </div>
+      <div style={{ marginTop: '8px', fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+        QR_PAYLOAD: {payloadPrefix}{payloadValue}
+      </div>
+    </div>
+  );
 }
 
 interface BatchQRCardProps {
@@ -95,7 +176,7 @@ export default function GenerateView({
   clearPreFill,
 }: GenerateViewProps) {
   // Input tabs
-  const [activeTab, setActiveTab] = useState<'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo'>('text');
+  const [activeTab, setActiveTab] = useState<GenerateTab>('text');
 
   // Generation Mode and Batch Input States
   const [genMode, setGenMode] = useState<'single' | 'batch'>('single');
@@ -110,11 +191,10 @@ export default function GenerateView({
   const [wifiPassword, setWifiPassword] = useState<string>('');
   const [wifiSecurity, setWifiSecurity] = useState<'WPA' | 'WEP' | 'nopass'>('WPA');
   
-  // vCard schema
-  const [vcardName, setVcardName] = useState<string>('');
-  const [vcardPhone, setVcardPhone] = useState<string>('');
-  const [vcardEmail, setVcardEmail] = useState<string>('');
-  const [vcardNote, setVcardNote] = useState<string>('');
+  // Image schema
+  const [imagePayload, setImagePayload] = useState<string>('');
+  const [imageFileName, setImageFileName] = useState<string>('');
+  const [imageWarning, setImageWarning] = useState<string>('');
 
   // Email schema
   const [emailTo, setEmailTo] = useState<string>('');
@@ -122,11 +202,13 @@ export default function GenerateView({
   const [emailBody, setEmailBody] = useState<string>('');
 
   // SMS schema
+  const [smsCountryCode, setSmsCountryCode] = useState<string>('+86');
   const [smsPhone, setSmsPhone] = useState<string>('');
   const [smsMessage, setSmsMessage] = useState<string>('');
 
   // Phone schema
   const [phoneNum, setPhoneNum] = useState<string>('');
+  const [phoneCountryCode, setPhoneCountryCode] = useState<string>('+86');
 
   // Geolocation schema
   const [geoLat, setGeoLat] = useState<string>('');
@@ -152,7 +234,14 @@ export default function GenerateView({
   // Pre-fill handling (navigated from Scan result page)
   useEffect(() => {
     if (preFillContent && preFillType) {
-      setActiveTab(preFillType as any);
+      if (preFillType === 'vcard') {
+        setActiveTab('text');
+        setTextContent(preFillContent);
+        clearPreFill();
+        addToast('名片内容已作为文本载入生成器', 'info');
+        return;
+      }
+      setActiveTab(preFillType as GenerateTab);
       if (preFillType === 'text') setTextContent(preFillContent);
       else if (preFillType === 'url') setUrlContent(preFillContent);
       else if (preFillType === 'wifi') {
@@ -162,15 +251,9 @@ export default function GenerateView({
         if (matchS) setWifiSsid(matchS[1]);
         if (matchT) setWifiSecurity(matchT[1] as any);
         if (matchP) setWifiPassword(matchP[1]);
-      } else if (preFillType === 'vcard') {
-        const matchFN = preFillContent.match(/FN:([^\r\n]+)/);
-        const matchTEL = preFillContent.match(/TEL;?[^:]*:([^\r\n]+)/);
-        const matchEMAIL = preFillContent.match(/EMAIL;?[^:]*:([^\r\n]+)/);
-        const matchNOTE = preFillContent.match(/NOTE:([^\r\n]+)/);
-        if (matchFN) setVcardName(matchFN[1]);
-        if (matchTEL) setVcardPhone(matchTEL[1]);
-        if (matchEMAIL) setVcardEmail(matchEMAIL[1]);
-        if (matchNOTE) setVcardNote(matchNOTE[1]);
+      } else if (preFillType === 'image') {
+        setImagePayload(preFillContent);
+        setImageFileName('prefilled-image');
       } else if (preFillType === 'email') {
         // Parse email mailto:recipient?subject=...&body=...
         const mailtoMatch = preFillContent.match(/^mailto:([^?]+)/i);
@@ -183,18 +266,24 @@ export default function GenerateView({
         if (preFillContent.toLowerCase().startsWith('smsto:')) {
           const smsMatch = preFillContent.match(/^SMSTO:([^:]+):(.*)$/i);
           if (smsMatch) {
-            setSmsPhone(smsMatch[1]);
+            const parsed = splitInternationalPhone(smsMatch[1]);
+            setSmsCountryCode(parsed.countryCode);
+            setSmsPhone(parsed.localNumber);
             setSmsMessage(smsMatch[2]);
           }
         } else {
           const matchPhone = preFillContent.match(/^sms:([^?]+)/i);
-          if (matchPhone) setSmsPhone(matchPhone[1]);
+          if (matchPhone) {
+            const parsed = splitInternationalPhone(matchPhone[1]);
+            setSmsCountryCode(parsed.countryCode);
+            setSmsPhone(parsed.localNumber);
+          }
           const matchBody = preFillContent.match(/[?&]body=([^&]+)/i);
           if (matchBody) setSmsMessage(decodeURIComponent(matchBody[1]));
         }
       } else if (preFillType === 'phone') {
         const telMatch = preFillContent.match(/^tel:(.*)$/i);
-        if (telMatch) setPhoneNum(telMatch[1]);
+        if (telMatch) setPhoneFromInternational(telMatch[1]);
       } else if (preFillType === 'geo') {
         const geoMatch = preFillContent.match(/^geo:([^,;?]+),([^,;?]+)/i);
         if (geoMatch) {
@@ -207,6 +296,28 @@ export default function GenerateView({
     }
   }, [preFillContent, preFillType]);
 
+  const normalizeLocalPhone = (value: string) => value.replace(/[^\d]/g, '').replace(/^0+/, '');
+
+  const getInternationalPhone = (countryCode: string, localNumber: string) => `${countryCode}${normalizeLocalPhone(localNumber)}`;
+
+  const splitInternationalPhone = (value: string) => {
+    const compact = value.replace(/[^\d+]/g, '');
+    const match = PHONE_COUNTRIES
+      .slice()
+      .sort((a, b) => b.code.length - a.code.length)
+      .find((country) => compact.startsWith(country.code));
+    if (match) {
+      return { countryCode: match.code, localNumber: compact.slice(match.code.length) };
+    }
+    return { countryCode: '+86', localNumber: compact.replace(/^\+/, '') };
+  };
+
+  const setPhoneFromInternational = (value: string) => {
+    const parsed = splitInternationalPhone(value);
+    setPhoneCountryCode(parsed.countryCode);
+    setPhoneNum(parsed.localNumber);
+  };
+
   // Compute final QR content string depending on active Tab schema
   const getQrContent = (): string => {
     switch (activeTab) {
@@ -215,22 +326,14 @@ export default function GenerateView({
       case 'wifi':
         const escape = (val: string) => val.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/:/g, '\\:').replace(/,/g, '\\,');
         return `WIFI:S:${escape(wifiSsid)};T:${wifiSecurity};P:${escape(wifiPassword)};;`;
-      case 'vcard':
-        return [
-          'BEGIN:VCARD',
-          'VERSION:3.0',
-          `FN:${vcardName.trim()}`,
-          vcardPhone.trim() ? `TEL;TYPE=CELL:${vcardPhone.trim()}` : '',
-          vcardEmail.trim() ? `EMAIL:${vcardEmail.trim()}` : '',
-          vcardNote.trim() ? `NOTE:${vcardNote.trim()}` : '',
-          'END:VCARD'
-        ].filter(Boolean).join('\n');
+      case 'image':
+        return imagePayload || 'data:image/plain;base64,';
       case 'email':
         return `mailto:${emailTo.trim()}?subject=${encodeURIComponent(emailSubject.trim())}&body=${encodeURIComponent(emailBody.trim())}`;
       case 'sms':
-        return `SMSTO:${smsPhone.trim()}:${smsMessage.trim()}`;
+        return `SMSTO:${getInternationalPhone(smsCountryCode, smsPhone)}:${smsMessage.trim()}`;
       case 'phone':
-        return `tel:${phoneNum.trim()}`;
+        return `tel:${getInternationalPhone(phoneCountryCode, phoneNum)}`;
       case 'geo':
         return `geo:${geoLat.trim()},${geoLng.trim()}`;
       default:
@@ -246,6 +349,11 @@ export default function GenerateView({
     return `gradient:${gradType}:${gradColor1}:${gradColor2}`;
   };
 
+  const getErrorCorrectionLevel = (): 'L' | 'M' | 'Q' | 'H' => {
+    if (activeTab === 'image') return 'L';
+    return logoDataUrl ? 'Q' : 'M';
+  };
+
   // Real-time rendering effect
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -255,12 +363,12 @@ export default function GenerateView({
     const options: QRDrawingOptions = {
       width: 400,
       margin: 4,
-      errorCorrectionLevel: logoDataUrl ? 'Q' : 'M',
+      errorCorrectionLevel: getErrorCorrectionLevel(),
       foreground: getForegroundOption(),
       background: bgColor,
       dotStyle,
       eyeStyle,
-      logoDataUrl: logoDataUrl || undefined,
+      logoDataUrl: activeTab === 'image' ? undefined : logoDataUrl || undefined,
       logoSizeRatio,
     };
 
@@ -274,16 +382,15 @@ export default function GenerateView({
     wifiSsid,
     wifiPassword,
     wifiSecurity,
-    vcardName,
-    vcardPhone,
-    vcardEmail,
-    vcardNote,
+    imagePayload,
     emailTo,
     emailSubject,
     emailBody,
+    smsCountryCode,
     smsPhone,
     smsMessage,
     phoneNum,
+    phoneCountryCode,
     geoLat,
     geoLng,
     colorMode,
@@ -299,7 +406,7 @@ export default function GenerateView({
   ]);
 
   // Log and save generation history
-  const logGenerateHistory = async () => {
+  const logGenerateHistory = async (filePath?: string) => {
     if (!settings.saveHistory) return;
     const content = getQrContent();
     try {
@@ -308,6 +415,7 @@ export default function GenerateView({
         dataType: activeTab,
         content,
         source: 'manual',
+        filePath,
       });
     } catch (e) {
       console.error('Failed to log generate history:', e);
@@ -331,12 +439,12 @@ export default function GenerateView({
     const options: QRDrawingOptions = {
       width: 400,
       margin: 4,
-      errorCorrectionLevel: logoDataUrl ? 'Q' : 'M',
+      errorCorrectionLevel: getErrorCorrectionLevel(),
       foreground: getForegroundOption(),
       background: bgColor,
       dotStyle,
       eyeStyle,
-      logoDataUrl: logoDataUrl || undefined,
+      logoDataUrl: activeTab === 'image' ? undefined : logoDataUrl || undefined,
       logoSizeRatio,
     };
 
@@ -348,19 +456,6 @@ export default function GenerateView({
         const dataUrl = offscreenCanvas.toDataURL('image/png');
         const filename = `qrcode_batch_${i + 1}.png`;
 
-        if (settings.saveHistory) {
-          try {
-            await bridge.addHistory({
-              type: 'generate',
-              dataType: 'text',
-              content,
-              source: 'manual',
-            });
-          } catch (e) {
-            console.error('Failed to log history item:', e);
-          }
-        }
-
         const res = await bridge.saveFile({
           content: dataUrl,
           encoding: 'dataUrl',
@@ -369,6 +464,19 @@ export default function GenerateView({
         });
         if (res.success) {
           successCount++;
+          if (settings.saveHistory) {
+            try {
+              await bridge.addHistory({
+                type: 'generate',
+                dataType: 'text',
+                content,
+                source: 'manual',
+                filePath: res.path,
+              });
+            } catch (e) {
+              console.error('Failed to log history item:', e);
+            }
+          }
         }
       } catch (err) {
         console.error(`Failed to generate batch item ${i + 1}:`, err);
@@ -387,7 +495,6 @@ export default function GenerateView({
       const dataUrl = canvas.toDataURL('image/png');
       const filename = `qrcode_${Date.now()}.png`;
 
-      await logGenerateHistory();
       const res = await bridge.saveFile({
         content: dataUrl,
         encoding: 'dataUrl',
@@ -396,6 +503,7 @@ export default function GenerateView({
       });
 
       if (res.success) {
+        await logGenerateHistory(res.path);
         addToast(`PNG 导出成功！保存至: ${res.path || filename}`, 'success');
       } else {
         addToast(`保存 PNG 失败: ${res.error}`, 'error');
@@ -412,19 +520,18 @@ export default function GenerateView({
       const options: QRDrawingOptions = {
         width: 400,
         margin: 4,
-        errorCorrectionLevel: logoDataUrl ? 'Q' : 'M',
+        errorCorrectionLevel: getErrorCorrectionLevel(),
         foreground: getForegroundOption(),
         background: bgColor,
         dotStyle,
         eyeStyle,
-        logoDataUrl: logoDataUrl || undefined,
+        logoDataUrl: activeTab === 'image' ? undefined : logoDataUrl || undefined,
         logoSizeRatio,
       };
 
       const svgText = await generateQRSvg(qrContent, options);
       const filename = `qrcode_${Date.now()}.svg`;
 
-      await logGenerateHistory();
       const res = await bridge.saveFile({
         content: svgText,
         encoding: 'text',
@@ -433,6 +540,7 @@ export default function GenerateView({
       });
 
       if (res.success) {
+        await logGenerateHistory(res.path);
         addToast(`SVG 导出成功！保存至: ${res.path || filename}`, 'success');
       } else {
         addToast(`保存 SVG 失败: ${res.error}`, 'error');
@@ -442,12 +550,47 @@ export default function GenerateView({
     }
   };
 
+  const handleImagePayloadUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const extAllowed = /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(file.name);
+    if (!file.type.startsWith('image/') && !extAllowed) {
+      addToast('请选择 PNG/JPG/WEBP/GIF/SVG/BMP 图片', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = String(event.target?.result || '');
+      setImagePayload(dataUrl);
+      setImageFileName(file.name);
+      if (dataUrl.length > 2400) {
+        setImageWarning('图片已载入，但内容较大。二维码容量有限，建议使用小图标、SVG 或压缩后的小图片。');
+      } else {
+        setImageWarning('');
+      }
+      addToast('图片已载入二维码内容', 'success');
+    };
+    reader.onerror = () => addToast('读取图片失败', 'error');
+    reader.readAsDataURL(file);
+  };
+
+  const clearImagePayload = () => {
+    setImagePayload('');
+    setImageFileName('');
+    setImageWarning('');
+    addToast('图片内容已清除', 'info');
+  };
+
   // Logo Upload Ingest
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
+    const extAllowed = /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(file.name);
+    if (!file.type.startsWith('image/') && !extAllowed) {
       addToast('请选择有效的图片文件！', 'error');
       return;
     }
@@ -513,9 +656,9 @@ export default function GenerateView({
                   <Wifi size={13} />
                   <span>Wi-Fi [NET]</span>
                 </button>
-                <button className={`te-jog-btn ${activeTab === 'vcard' ? 'active' : ''}`} onClick={() => setActiveTab('vcard')}>
-                  <User size={13} />
-                  <span>名片 [CARD]</span>
+                <button className={`te-jog-btn ${activeTab === 'image' ? 'active' : ''}`} onClick={() => setActiveTab('image')}>
+                  <ImageIcon size={13} />
+                  <span>图片 [IMG]</span>
                 </button>
               </div>
               <div className="te-jog-row" style={{ padding: '2px' }}>
@@ -613,48 +756,30 @@ export default function GenerateView({
                 </div>
               )}
 
-              {activeTab === 'vcard' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', zIndex: 2, position: 'relative' }}>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">姓名</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={vcardName}
-                      onChange={(e) => setVcardName(e.target.value)}
-                      placeholder="FN 姓名"
-                    />
-                  </div>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">移动电话</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={vcardPhone}
-                      onChange={(e) => setVcardPhone(e.target.value)}
-                      placeholder="TEL 电话"
-                    />
-                  </div>
-                  <div className="form-group" style={{ margin: 0, gridColumn: 'span 2' }}>
-                    <label className="form-label">电子邮箱</label>
-                    <input
-                      type="email"
-                      className="form-input"
-                      value={vcardEmail}
-                      onChange={(e) => setVcardEmail(e.target.value)}
-                      placeholder="EMAIL 地址"
-                    />
-                  </div>
-                  <div className="form-group" style={{ margin: 0, gridColumn: 'span 2' }}>
-                    <label className="form-label">额外备注</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={vcardNote}
-                      onChange={(e) => setVcardNote(e.target.value)}
-                      placeholder="NOTE 简要备注"
-                    />
-                  </div>
+              {activeTab === 'image' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', zIndex: 2, position: 'relative' }}>
+                  <input
+                    id="image-payload-picker"
+                    type="file"
+                    accept={COMMON_IMAGE_ACCEPT}
+                    style={{ display: 'none' }}
+                    onChange={handleImagePayloadUpload}
+                  />
+                  <button className="btn btn-secondary" onClick={() => document.getElementById('image-payload-picker')?.click()}>
+                    <ImageIcon size={14} />
+                    <span>选择图片 PNG/JPG/WEBP/GIF/SVG/BMP</span>
+                  </button>
+                  {imagePayload && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr auto', gap: '12px', alignItems: 'center', padding: '10px', background: 'var(--bg-deep)', border: '1px solid var(--border-glass)', borderRadius: '4px' }}>
+                      <img src={imagePayload} alt="图片二维码内容预览" style={{ width: '72px', height: '72px', objectFit: 'contain', background: '#fff', borderRadius: '4px' }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: 'var(--text-title)', fontSize: '0.82rem', fontWeight: 700, wordBreak: 'break-all' }}>{imageFileName || '已载入图片'}</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '4px' }}>二维码内容长度: {imagePayload.length} 字符</div>
+                        {imageWarning && <div style={{ color: 'var(--accent-orange)', fontSize: '0.68rem', marginTop: '6px', lineHeight: 1.4 }}>{imageWarning}</div>}
+                      </div>
+                      <button className="btn btn-danger" style={{ padding: '6px 10px', fontSize: '0.75rem' }} onClick={clearImagePayload}>清除</button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -695,16 +820,15 @@ export default function GenerateView({
 
               {activeTab === 'sms' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', zIndex: 2, position: 'relative' }}>
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label">接收人手机号码</label>
-                    <input
-                      type="tel"
-                      className="form-input"
-                      value={smsPhone}
-                      onChange={(e) => setSmsPhone(e.target.value)}
-                      placeholder="+8613800000000"
-                    />
-                  </div>
+                  <PhoneNumberField
+                    label="接收人手机号码"
+                    countryCode={smsCountryCode}
+                    onCountryCodeChange={setSmsCountryCode}
+                    number={smsPhone}
+                    onNumberChange={setSmsPhone}
+                    payloadPrefix="SMSTO:"
+                    payloadValue={getInternationalPhone(smsCountryCode, smsPhone)}
+                  />
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">短信正文</label>
                     <textarea
@@ -719,16 +843,15 @@ export default function GenerateView({
               )}
 
               {activeTab === 'phone' && (
-                <div className="form-group" style={{ margin: 0, zIndex: 2, position: 'relative' }}>
-                  <label className="form-label">电话号码</label>
-                  <input
-                    type="tel"
-                    className="form-input"
-                    value={phoneNum}
-                    onChange={(e) => setPhoneNum(e.target.value)}
-                    placeholder="+8610086"
-                  />
-                </div>
+                <PhoneNumberField
+                  label="电话号码"
+                  countryCode={phoneCountryCode}
+                  onCountryCodeChange={setPhoneCountryCode}
+                  number={phoneNum}
+                  onNumberChange={setPhoneNum}
+                  payloadPrefix="tel:"
+                  payloadValue={getInternationalPhone(phoneCountryCode, phoneNum)}
+                />
               )}
 
               {activeTab === 'geo' && (
@@ -1069,7 +1192,7 @@ export default function GenerateView({
               <div className="te-screw br"></div>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', zIndex: 2, position: 'relative' }}>
-                <Image size={15} color="var(--accent-cyan)" />
+                <ImageIcon size={15} color="var(--accent-cyan)" />
                 <h3 style={{ fontSize: '0.85rem', margin: 0, color: 'var(--text-title)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>中心水印 [LOGO_INJECTOR]</h3>
               </div>
               
@@ -1087,7 +1210,7 @@ export default function GenerateView({
                 <input
                   id="logo-file-picker"
                   type="file"
-                  accept="image/*"
+                  accept={COMMON_IMAGE_ACCEPT}
                   style={{ display: 'none' }}
                   onChange={handleLogoUpload}
                 />

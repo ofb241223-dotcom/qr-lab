@@ -5,7 +5,7 @@ import GenerateView from './components/GenerateView';
 import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
 import bridge from './bridge/desktopBridge';
-import type { AppSettings, BridgeInfo } from './bridge/desktopBridge';
+import type { AppSettings, BridgeInfo, DataType } from './bridge/desktopBridge';
 
 interface Toast {
   id: string;
@@ -15,6 +15,9 @@ interface Toast {
 
 function App() {
   const [currentTab, setCurrentTab] = useState<'scan' | 'generate' | 'history' | 'settings'>('scan');
+  const [scanMode, setScanMode] = useState<'camera' | 'screen' | 'file'>('camera');
+  const [screenScanTrigger, setScreenScanTrigger] = useState<number>(0);
+  const [fileScanTrigger, setFileScanTrigger] = useState<number>(0);
   const [bridgeInfo, setBridgeInfo] = useState<BridgeInfo | null>(null);
   
   // Camera & Scan control states (Landed from Sidebar knobs & patch bay)
@@ -22,8 +25,6 @@ function App() {
   const [isScanningScreen, setIsScanningScreen] = useState<boolean>(false);
   const [knobA, setKnobA] = useState<number>(0);
   const [knobB, setKnobB] = useState<number>(180);
-  const [screenScanTrigger, setScreenScanTrigger] = useState<number>(0);
-  const [fileScanTrigger, setFileScanTrigger] = useState<number>(0);
   
   // Real-time camera stream specifications
   const [cameraFps, setCameraFps] = useState<number>(0);
@@ -40,7 +41,7 @@ function App() {
 
   // Pre-fill state (Scan -> Generate navigation bridge)
   const [preFillContent, setPreFillContent] = useState<string | null>(null);
-  const [preFillType, setPreFillType] = useState<'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo' | null>(null);
+  const [preFillType, setPreFillType] = useState<DataType | null>(null);
 
   // Toast notifications state
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -85,18 +86,24 @@ function App() {
   // Global keydown listeners for keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Check Alt + 1..4 (or Option + 1..4 on macOS)
+      // Check Alt + 1..6 (or Option + 1..6 on macOS)
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         if (e.key === '1') {
           e.preventDefault();
-          setCurrentTab('scan');
+          openCameraScan();
         } else if (e.key === '2') {
           e.preventDefault();
-          setCurrentTab('generate');
+          openScreenScan();
         } else if (e.key === '3') {
           e.preventDefault();
-          setCurrentTab('history');
+          openFileScan();
         } else if (e.key === '4') {
+          e.preventDefault();
+          setCurrentTab('generate');
+        } else if (e.key === '5') {
+          e.preventDefault();
+          setCurrentTab('history');
+        } else if (e.key === '6') {
           e.preventDefault();
           setCurrentTab('settings');
         }
@@ -126,18 +133,48 @@ function App() {
   };
 
   // Navigates to Generate View and prefills QR details
-  const handleGeneratePreFill = (content: string, type: 'text' | 'url' | 'wifi' | 'vcard' | 'email' | 'sms' | 'phone' | 'geo') => {
+  const handleGeneratePreFill = (content: string, type: DataType) => {
     setPreFillContent(content);
     setPreFillType(type);
     setCurrentTab('generate');
   };
 
+  const openCameraScan = () => {
+    setScanMode('camera');
+    setCurrentTab('scan');
+  };
+
+  const openScreenScan = () => {
+    setScanMode('screen');
+    setCurrentTab('scan');
+  };
+
+  const openFileScan = () => {
+    setScanMode('file');
+    setCurrentTab('scan');
+  };
+
+  const triggerPatchBayScreenScan = () => {
+    setScanMode('screen');
+    setScreenScanTrigger((prev) => prev + 1);
+    setCurrentTab('scan');
+  };
+
+  const triggerPatchBayFileScan = () => {
+    setScanMode('file');
+    setFileScanTrigger((prev) => prev + 1);
+    setCurrentTab('scan');
+  };
+
   const getHeaderTitle = () => {
     switch (currentTab) {
-      case 'scan': return 'MODE: CAMERA_SCANNER [CH_01]';
-      case 'generate': return 'MODE: QR_GENERATOR [CH_02]';
-      case 'history': return 'MODE: LOG_HISTORY [CH_03]';
-      case 'settings': return 'MODE: SYSTEM_SETTINGS [CH_04]';
+      case 'scan':
+        if (scanMode === 'screen') return 'MODE: SCREEN_CAPTURE_SCAN [CH_02]';
+        if (scanMode === 'file') return 'MODE: IMAGE_FILE_SCAN [CH_03]';
+        return 'MODE: CAMERA_SCANNER [CH_01]';
+      case 'generate': return 'MODE: QR_GENERATOR [CH_04]';
+      case 'history': return 'MODE: LOG_HISTORY [CH_05]';
+      case 'settings': return 'MODE: SYSTEM_SETTINGS [CH_06]';
       default: return 'MODE: QR_TOOLBOX';
     }
   };
@@ -148,6 +185,10 @@ function App() {
       <Sidebar
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
+        scanMode={scanMode}
+        openCameraScan={openCameraScan}
+        openScreenScan={openScreenScan}
+        openFileScan={openFileScan}
         bridgeInfo={bridgeInfo}
         theme={settings.theme}
         setTheme={(theme) => updateSettingValue('theme', theme)}
@@ -158,8 +199,8 @@ function App() {
         setKnobA={setKnobA}
         knobB={knobB}
         setKnobB={setKnobB}
-        triggerScreenScan={() => setScreenScanTrigger(prev => prev + 1)}
-        triggerFileScan={() => setFileScanTrigger(prev => prev + 1)}
+        triggerScreenScan={triggerPatchBayScreenScan}
+        triggerFileScan={triggerPatchBayFileScan}
         addToast={addToast}
         cameraFps={cameraFps}
       />
@@ -185,6 +226,8 @@ function App() {
               setIsCameraActive={setIsCameraActive}
               isScanningScreen={isScanningScreen}
               setIsScanningScreen={setIsScanningScreen}
+              scanMode={scanMode}
+              setScanMode={setScanMode}
               screenScanTrigger={screenScanTrigger}
               fileScanTrigger={fileScanTrigger}
               onStreamInfoChange={(fps) => {
